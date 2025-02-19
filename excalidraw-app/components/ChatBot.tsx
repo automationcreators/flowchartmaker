@@ -63,85 +63,76 @@ export const ChatBot: React.FC<ChatBotProps> = ({ excalidrawAPI }) => {
     initializeChat();
   }, [apiKey]);
 
-  const generateMermaidDiagram = async (userInput: string) => {
+  const generateMermaidDiagram = async (text: string) => {
     if (!threadId) {
-      console.error("Thread not initialized");
-      return;
+      throw new Error("Thread not initialized");
     }
 
     try {
       setIsLoading(true);
-      console.log("Starting diagram generation for input:", userInput);
-      console.log("Using thread ID:", threadId);
-
+      
       // Add the user's message to the thread
-      const threadMessage = await openai.beta.threads.messages.create(threadId, {
+      await openai.beta.threads.messages.create(threadId, {
         role: "user",
-        content: `Convert this description into a Mermaid diagram: ${userInput}`,
+        content: `Create a Mermaid diagram for: ${text}. Use flowchart TD syntax. Only respond with valid Mermaid syntax, no other text.`,
       });
-      console.log("Created thread message:", threadMessage);
 
       // Run the assistant
-      console.log("Starting assistant run with ID:", ASSISTANT_ID);
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: ASSISTANT_ID,
       });
-      console.log("Created run:", run);
 
-      // Poll for the run completion
+      // Poll for completion
       let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-      console.log("Initial run status:", runStatus.status);
-      
       while (runStatus.status !== "completed") {
-        if (runStatus.status === "failed" || runStatus.status === "cancelled" || runStatus.status === "expired") {
-          console.error("Run failed with status:", runStatus.status);
-          throw new Error(`Assistant run ${runStatus.status}`);
+        if (runStatus.status === "failed") {
+          throw new Error("Assistant run failed");
         }
-        console.log("Waiting for completion, current status:", runStatus.status);
         await new Promise(resolve => setTimeout(resolve, 1000));
         runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
       }
 
-      // Get the assistant's response
-      console.log("Run completed, fetching messages");
+      // Get the response
       const messages = await openai.beta.threads.messages.list(threadId);
-      console.log("Received messages:", messages);
-      
       const assistantMessage = messages.data[0].content[0];
-      console.log("Assistant message:", assistantMessage);
       
-      if (assistantMessage.type === 'text') {
-        const mermaidSyntax = assistantMessage.text.value;
-        console.log("Mermaid syntax:", mermaidSyntax);
-
-        try {
-          const { elements } = await parseMermaidToExcalidraw(mermaidSyntax);
-          console.log("Generated Excalidraw elements:", elements);
-          
-          excalidrawAPI.updateScene({
-            elements,
-          });
-
-          setMessages((prev) => [
-            ...prev,
-            { role: "user", content: userInput },
-            { role: "assistant", content: "Diagram generated successfully!" },
-          ]);
-        } catch (parseError) {
-          console.error("Error parsing Mermaid syntax:", parseError);
-          throw new Error("Failed to parse Mermaid diagram");
-        }
-      } else {
-        console.error("Unexpected message type:", assistantMessage.type);
-        throw new Error("Unexpected response format from assistant");
+      if (assistantMessage.type !== "text") {
+        throw new Error("Unexpected response format");
       }
-    } catch (err) {
-      console.error("Error in generateMermaidDiagram:", err);
-      const error = err as Error;
-      setMessages((prev) => [
+
+      let mermaidSyntax = assistantMessage.text.value.trim();
+      
+      // Ensure the syntax starts with flowchart TD or graph TD
+      if (!mermaidSyntax.startsWith("flowchart TD") && !mermaidSyntax.startsWith("graph TD")) {
+        mermaidSyntax = `flowchart TD\n${mermaidSyntax}`;
+      }
+
+      // Remove any markdown code block markers
+      mermaidSyntax = mermaidSyntax.replace(/```mermaid\n?/g, "").replace(/```\n?/g, "").trim();
+
+      try {
+        const { elements } = await parseMermaidToExcalidraw(mermaidSyntax);
+        
+        if (!elements || elements.length === 0) {
+          throw new Error("No elements generated from Mermaid syntax");
+        }
+
+        excalidrawAPI.updateScene({
+          elements,
+        });
+
+        setMessages(prev => [
+          ...prev,
+          { role: "assistant", content: "Diagram generated successfully!" }
+        ]);
+      } catch (parseError) {
+        throw new Error(`Failed to parse Mermaid syntax: ${mermaidSyntax}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "An error occurred";
+      setMessages(prev => [
         ...prev,
-        { role: "user", content: userInput },
-        { role: "assistant", content: `Error: ${error.message || "Failed to generate diagram"}. Please try again.` },
+        { role: "assistant", content: `Error: ${errorMessage}` }
       ]);
     } finally {
       setIsLoading(false);
