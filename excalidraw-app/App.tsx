@@ -132,6 +132,7 @@ import DebugCanvas, {
 import { AIComponents } from "./components/AI";
 import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 import { isElementLink } from "../packages/excalidraw/element/elementLink";
+import { ChatBot } from "./components/ChatBot";
 
 polyfill();
 
@@ -893,7 +894,7 @@ const ExcalidrawWrapper = () => {
         </OverwriteConfirmDialog>
         <AppFooter onChange={() => excalidrawAPI?.refresh()} />
         {excalidrawAPI && <AIComponents excalidrawAPI={excalidrawAPI} />}
-
+        {excalidrawAPI && <ChatBot excalidrawAPI={excalidrawAPI} />}
         <TTDDialogTrigger />
         {isCollaborating && isOffline && (
           <div className="collab-offline-warning">
